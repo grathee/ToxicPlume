@@ -7,20 +7,21 @@ library(gstat)
 library(rgdal)
 library(rgeos)
 
-setwd("E:/GRS-33306/Campus")  # set to proper folder
+setwd("/home/user/Downloads")  # set to proper folder
 
 # **************************
 # ------- Question 2 -------
 # **************************
 
 # Enter group number
-group <- 3   # provide correct number
+group <- 9   # provide correct number
 
 # Read the data of all groups
 # IT MAY BE NECESSARY TO CLEAR THE CACHE OF YOUR WEB BROWSER 
 # (F5 or Ctrl-Shift-R while using the web browser)
 all_obs <- read.table(url("http://scomp5062.wur.nl/courses/grs33306/output/observations.txt"), header=T)
 all_obs$datime <- as.POSIXct(all_obs$datime, format='%Y-%m-%d %H:%M:%S')
+
 
 # Delete accidental adjacent duplicate records with identical co-ordinates
 # and up to 5 seconds temporal difference.
@@ -48,6 +49,7 @@ prj_string_RD <- CRS("+proj=sterea +lat_0=52.15616055555555 +lon_0=5.38763888888
 +k=0.9999079 +x_0=155000 +y_0=463000 +ellps=bessel +towgs84=565.2369,50.0087,465.658,
 -0.406857330322398,0.350732676542563,-1.8703473836068,4.0812 +units=m +no_defs")
 all_rd <- spTransform(all_obs, prj_string_RD)
+
 dimnames(all_rd@coords)[[2]] <- c("x", "y")
 
 # Retrieve extent study area from the server
@@ -74,7 +76,8 @@ CreateSnapshot <- function(mapdata, predtime, starttime, grd){
     coordinates(subdata) <- ~x+y+t
     outmap <- idw(ppm~1, subdata, SpatialPoints(grd), idp=2.0, debug.level=0)$var1.pred
   } else{
-    outmap <- rep(0, 10000)
+    
+  	outmap <- rep(0, 10000)
   }
   outmap <-  SpatialPixelsDataFrame(SpatialPoints(grd[1:2]), data.frame(ppm=outmap))
   # where/when is the threshold exceeded?
@@ -107,11 +110,27 @@ forbidden <- readOGR("WaterBuildings.shp", "WaterBuildings")
 forbiddenRD <- spTransform(forbidden, prj_string_RD)
 
 # plot a map
-i <- 2   # for example
+testit <- function(x)
+{
+	p1 <- proc.time()
+	Sys.sleep(x)
+	proc.time() - p1 # The cpu usage should be negligible
+}
+
+for (i in 1:8){
+	mymap <- CreateSnapshot(all_rd, pred_times[i], start_time, RDgrid)
+	print(spplot(mymap, zcol="danger", col.regions=c("dark green", "red"), 
+				 main=as.character(pred_times[i]), scales = list(draw = T),
+				 sp.layout=list("sp.polygons", forbiddenRD, col.regions="black", lwd=2, first=F)))
+	testit(5)
+}
+	
+
+i <- 1   # for example
 mymap <- CreateSnapshot(all_rd, pred_times[i], start_time, RDgrid)
-spplot(mymap, zcol="danger", col.regions=c("dark green", "red"), 
+print(spplot(mymap, zcol="danger", col.regions=c("dark green", "red"), 
        main=as.character(pred_times[i]), scales = list(draw = T),
-       sp.layout=list("sp.polygons", forbiddenRD, col.regions="black", lwd=2, first=F))
+       sp.layout=list("sp.polygons", forbiddenRD, col.regions="black", lwd=2, first=F)))
 
 
 # Make two subsets of data: one excluding the data of group and one
@@ -128,6 +147,7 @@ groupObserve <- all_rd[which(all_rd$GNo == group),]
 # that cannot be measured, within a pond, building, or dangerous road. (1) choose a
 # random start location, (2) make measurement, (3) choose a random direction, (4)
 # go to new valid point that can be reached within the time interval from perm, (5) 
+
 # repeat untill nobsgroup measurements are made.
 
 # Read studyarea; derive valid samplin area
@@ -174,17 +194,22 @@ RandomWalk <- function(groupdata,validpoly){
   locs <- SpatialPointsDataFrame(locs, data = data.frame(datime=times),
                                  proj4string=validpoly@proj4string)
   locs <- spTransform(locs, CRS("+proj=longlat +datum=WGS84"))
+  spplot(locs)
   locs@proj4string <- CRS(as.character(NA))
   return(locs)
 }
+
+print(locs)
+locs
 
 # compare group with random walk sampling --- THIS TAKES A FEW MINUTES
 groupObserve$t <- as.numeric(difftime(groupObserve$datime, start_time, unit="mins"))
 set.seed(187) # make reproduceable
 randomcosts <- numeric(0)
-for (i in 1:100){   # 100 realizations of a random walk (maybe you want more or fewer)
+for (i in 1:4){   # 100 realizations of a random walk (maybe you want more or fewer)
   cat("Run", i, "of 100\n")
-  path <- RandomWalk(groupObserve, valid)
+	
+	path <- RandomWalk(groupObserve, valid)
   minute <- as.integer(difftime(path$datime, start_time, unit="mins")+0.5)
   ppm <- numeric(0)
   for(j in 1:nrow(path)){
@@ -219,11 +244,16 @@ for (i in 1:100){   # 100 realizations of a random walk (maybe you want more or 
     currentcost <- currentcost + sum(ifelse(currentmap$danger == F & timeslice$danger == T, 5, 
                                   ifelse(currentmap$danger == T & timeslice$danger == F, 1, 0)))
   }
+  
   randomcosts <- c(randomcosts,currentcost)
 }
 
 mean(randomcosts)
 
+
+#--- real plume
+con <- url(paste0("http://scomp5062.wur.nl/courses/grs33306/input/slice2015_",
+									sprintf("%03d", num),".Rdata"))
 # Plot of group performance compared to random behaviour
 ext <- range(randomcosts)
 ext <- (ext[2]-ext[1])/10.
